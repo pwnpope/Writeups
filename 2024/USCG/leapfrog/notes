@@ -1,0 +1,65 @@
+0x00007f640517e5d0 in ?? ()
+
+
+[ Legend: Modified register | Code | Heap | Stack | Writable | ReadOnly | None | RWX | String ]
+------------------------------------------------------------------------------------------------------------------ registers ----
+$rax   : 0x0000000400000000  ->  0x0000000000000000
+$rbx   : 0x0000000000000000
+$rcx   : 0x00007f640517e5c6  ->  0x7277fffff0003d48 ('H='?)
+$rdx   : 0x0000000000000007
+$rsp   : 0x00007ffee13dc180  ->  0x00007f64052530e0  ->  0x00000000deadbeef
+$rbp   : 0x00007ffee13dc180  ->  0x00007f64052530e0  ->  0x00000000deadbeef
+$rsi   : 0x0000000000001000
+$rdi   : 0x0000000400000000  ->  0x0000000000000000
+$rip   : 0x00007f640517e5d0  ->  0x00000000801f0fc3
+$r8    : 0xffffffffffffffff
+$r9    : 0x0000000000000000
+$r10   : 0x0000000000000022
+$r11   : 0x0000000000000306
+$r12   : 0x0000000000000000
+$r13   : 0x0000000000000000
+$r14   : 0x0000000000000000
+$r15   : 0x0000000000000000
+$eflags: 0x207 [ident align vx86 resume nested overflow direction INTERRUPT trap sign zero adjust PARITY CARRY] [Ring=3]
+$cs: 0x33 $ss: 0x2b $ds: 0x00 $es: 0x00 $fs: 0x00 $gs: 0x00 
+---------------------------------------------------------------------------------------------------------------------- stack ----
+$rsp+ 0x7ffee13dc180|+0x0000|+000: 0x00007f64052530e0  ->  0x00000000deadbeef  <-  retaddr[1]
+      0x7ffee13dc188|+0x0008|+001: 0x000000000000000a
+      0x7ffee13dc190|+0x0010|+002: 0x00007ffee13ded27  ->  0x424746524f4c4f43 'COLORFGBG=15;0'  <-  retaddr[3]
+      0x7ffee13dc198|+0x0018|+003: 0x00007ffee13ded36  ->  0x3d59414c50534944 'DISPLAY=:0'  <-  retaddr[4]
+      0x7ffee13dc1a0|+0x0020|+004: 0x00007ffee13ded41  ->  0x00313d4c564c4853 ('SHLVL=1'?)  <-  retaddr[5]
+      0x7ffee13dc1a8|+0x0028|+005: 0x00007ffee13ded49  ->  0x524e54565f474458 'XDG_VTNR=7'  <-  retaddr[6]
+      0x7ffee13dc1b0|+0x0030|+006: 0x00007ffee13ded54  ->  0x535345535f474458 'XDG_SESSION_ID=c1'  <-  retaddr[7]
+      0x7ffee13dc1b8|+0x0038|+007: 0x00007ffee13ded66  ->  0x544e55525f474458 'XDG_RUNTIME_DIR=/run/user/1000'  <-  retaddr[8]
+---------------------------------------------------------------------------------------------------------------- code:x86:64 ----
+    0x7f640517e5cc 7772                <NO_SYMBOL>   ja     0x7f640517e640 
+    0x7f640517e5ce 5b                  <NO_SYMBOL>   pop    rbx 
+    0x7f640517e5cf 5d                  <NO_SYMBOL>   pop    rbp 
+ -> 0x7f640517e5d0 c3                  <NO_SYMBOL>   ret     
+
+   -> 0x7f64052530e0 ef                  <NO_SYMBOL>   out    dx, eax 
+      0x7f64052530e1 beadde0000          <NO_SYMBOL>   mov    esi, 0xdead 
+      0x7f64052530e6 0000                <NO_SYMBOL>   add    BYTE PTR [rax], al 
+      0x7f64052530e8 0a00                <NO_SYMBOL>   or     al, BYTE PTR [rax] 
+      0x7f64052530ea 0000                <NO_SYMBOL>   add    BYTE PTR [rax], al 
+      0x7f64052530ec 0000                <NO_SYMBOL>   add    BYTE PTR [rax], al 
+
+    0x7f640517e5d1 0f1f8000000000      <NO_SYMBOL>   nop    DWORD PTR [rax + 0x0] 
+    0x7f640517e5d8 488b0519480d00      <NO_SYMBOL>   mov    rax, QWORD PTR [rip + 0xd4819] # 0x7f6405252df8
+    0x7f640517e5df 64c70016000000      <NO_SYMBOL>   mov    DWORD PTR fs:[rax], 0x16 
+    0x7f640517e5e6 48c7c0ffffffff      <NO_SYMBOL>   mov    rax, 0xffffffffffffffff 
+    0x7f640517e5ed c3                  <NO_SYMBOL>   ret     
+-------------------------------------------------------------------------------------------------------------------- threads ----
+[Thread Id:1, tid:13969] Name: "chall_patched", stopped at 0x7f640517e5d0 <NO_SYMBOL>, reason: SINGLE STEP
+---------------------------------------------------------------------------------------------------------------------- trace ----
+-> [#0] 0x7f640517e5d0 <NO_SYMBOL>
+   [#1] 0x7f64052530e0 <NO_SYMBOL>
+   [#2] 0x00000000000a <NO_SYMBOL>
+   [#3] 0x7ffee13ded27 <NO_SYMBOL>
+   [#4] 0x7ffee13ded36 <NO_SYMBOL>
+   [#5] 0x7ffee13ded41 <NO_SYMBOL>
+   [#6] 0x7ffee13ded49 <NO_SYMBOL>
+   [#7] 0x7ffee13ded54 <NO_SYMBOL>
+   [#8] 0x7ffee13ded66 <NO_SYMBOL>
+   [#9] 0x7ffee13ded85 <NO_SYMBOL>
+---------------------------------------------------------------------------------------------------------------------------------

